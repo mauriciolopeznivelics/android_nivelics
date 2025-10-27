@@ -1,173 +1,25 @@
-# GitHub Actions Workflow for SonarQube Integration
-# Demonstrates SonarQube analysis workflow for projects
-
-name: SonarQube Analysis Demo
+# SonarCloud Analysis Workflow
+name: SonarCloud Analysis
 
 on:
   push:
     branches: [ master, main, develop ]
   pull_request:
-    branches: [ master, main, develop ]
-
-env:
-  # SonarQube Configuration
-  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    types: [opened, synchronize, reopened]
 
 jobs:
-  # SonarQube Analysis Job - Analyze project structure and scripts
-  sonar-analysis:
-    name: SonarQube Analysis
+  sonarcloud:
+    name: SonarCloud Analysis
     runs-on: ubuntu-latest
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Disable shallow clone for better analysis
+        fetch-depth: 0  # Shallow clones should be disabled for better analysis
     
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-    
-    - name: Cache SonarQube packages
-      uses: actions/cache@v4
-      with:
-        path: ~/.sonar/cache
-        key: ${{ runner.os }}-sonar
-        restore-keys: ${{ runner.os }}-sonar
-    
-    - name: Analysis Started
-      run: echo "🔍 Starting SonarQube analysis..."
-    
-    - name: SonarQube Scan
-      run: |
-        echo "📦 Installing SonarQube Scanner..."
-        
-        # Install SonarQube Scanner
-        wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.8.0.2856-linux.zip
-        unzip -q sonar-scanner-cli-4.8.0.2856-linux.zip
-        export PATH=$PATH:$(pwd)/sonar-scanner-4.8.0.2856-linux/bin
-        
-        echo "🔍 Running SonarQube analysis..."
-        
-        # Run analysis using the sonar-project.properties in root
-        sonar-scanner \
-          -Dsonar.host.url=${{ env.SONAR_HOST_URL }} \
-          -Dsonar.login=${{ env.SONAR_TOKEN }} \
-          -Dsonar.branch.name=${{ github.ref_name }}
-        
-        echo "✅ SonarQube analysis completed successfully!"
-    
-    - name: Analysis Summary
-      if: always()
-      run: |
-        if [ ${{ job.status }} == 'success' ]; then
-          echo "✅ SonarQube analysis completed successfully!"
-          echo "🔗 View results at: ${{ env.SONAR_HOST_URL }}"
-        else
-          echo "❌ SonarQube analysis failed!"
-          echo "🔗 Check logs at: ${{ env.SONAR_HOST_URL }}"
-        fi
-
-  # Android Project Build Job (Optional - for test-android-project)
-  build-android-test:
-    name: Build Test Android Project
-    runs-on: ubuntu-latest
-    if: contains(github.event.head_commit.message, '[build-android]')
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-    
-    - name: Cache Gradle packages
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
-    
-    - name: Create Gradle Wrapper for test project
-      working-directory: test-android-project
-      run: |
-        echo "📦 Setting up Gradle wrapper for test project..."
-        gradle wrapper --gradle-version 8.0
-        chmod +x gradlew
-    
-    - name: Build test Android project
-      working-directory: test-android-project
-      run: |
-        echo "🔨 Building test Android project..."
-        ./gradlew clean build --stacktrace
-        echo "✅ Test project build completed"
-    
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: android-test-artifacts
-        path: |
-          test-android-project/app/build/outputs/
-          test-android-project/app/build/reports/
-        retention-days: 1
-
-
-
-  # Quality Gate Validation Job
-  quality-gate:
-    name: Quality Gate Validation
-    runs-on: ubuntu-latest
-    needs: sonar-analysis
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Quality Gate Check Started
-      run: echo "⏳ Checking Quality Gate status..."
-    
-    - name: Wait for Quality Gate
-      id: quality-gate-check
-      run: |
-        echo "⏳ Waiting for Quality Gate result..."
-        
-        # Use the quality gate check script
-        chmod +x scripts/quality-gate-check.sh
-        
-        # Capture exit code to determine success/failure
-        if ./scripts/quality-gate-check.sh; then
-          echo "quality_gate_status=success" >> $GITHUB_OUTPUT
-          echo "quality_gate_description=Quality Gate passed - Code meets quality standards" >> $GITHUB_OUTPUT
-        else
-          echo "quality_gate_status=failure" >> $GITHUB_OUTPUT
-          echo "quality_gate_description=Quality Gate failed - Code does not meet quality standards" >> $GITHUB_OUTPUT
-          exit 1
-        fi
+    - name: SonarCloud Scan
+      uses: SonarSource/sonarcloud-github-action@master
       env:
-        SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-    
-    - name: Quality Gate Summary
-      if: always()
-      run: |
-        if [ ${{ steps.quality-gate-check.outcome }} == 'success' ]; then
-          echo "✅ ${{ steps.quality-gate-check.outputs.quality_gate_description }}"
-          echo "🎉 Code meets quality standards - merge allowed!"
-        else
-          echo "❌ Quality Gate failed - Code does not meet quality standards"
-          echo "🚫 Merge blocked until quality issues are resolved"
-          echo "🔗 View details at: ${{ env.SONAR_HOST_URL }}"
-          exit 1
-        fi
