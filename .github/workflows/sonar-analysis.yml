@@ -1,7 +1,7 @@
-# GitHub Actions Workflow for Android Projects with SonarQube Integration
-# Alternative to GitLab CI/CD pipeline with same functionality
+# GitHub Actions Workflow for SonarQube Integration
+# Demonstrates SonarQube analysis workflow for projects
 
-name: Android CI/CD with SonarQube
+name: SonarQube Analysis Demo
 
 on:
   push:
@@ -10,140 +10,15 @@ on:
     branches: [ master, main, develop ]
 
 env:
-  # Android SDK Configuration
-  ANDROID_COMPILE_SDK: 34
-  ANDROID_BUILD_TOOLS: 34.0.0
-  
   # SonarQube Configuration
   SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
   SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
 jobs:
-  # Build Job - Compile Android Project
-  build:
-    name: Build Android Project
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # Shallow clones should be disabled for better analysis
-    
-    - name: Set up JDK 11
-      uses: actions/setup-java@v4
-      with:
-        java-version: '11'
-        distribution: 'temurin'
-    
-    - name: Cache Gradle packages
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
-    
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-    
-    - name: Build with Gradle
-      run: |
-        echo "🔨 Building Android project..."
-        ./gradlew clean assembleDebug --stacktrace
-        echo "✅ Build completed successfully"
-    
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-artifacts
-        path: |
-          app/build/outputs/
-          app/build/intermediates/
-        retention-days: 1
-
-  # Test Job - Execute Unit Tests and Generate Coverage
-  test:
-    name: Run Tests and Generate Coverage
-    runs-on: ubuntu-latest
-    needs: build
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    
-    - name: Set up JDK 11
-      uses: actions/setup-java@v4
-      with:
-        java-version: '11'
-        distribution: 'temurin'
-    
-    - name: Cache Gradle packages
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
-    
-    - name: Download build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: build-artifacts
-        path: app/build/
-    
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-    
-    - name: Run unit tests
-      run: |
-        echo "🧪 Running unit tests..."
-        ./gradlew testDebugUnitTest --stacktrace
-        echo "✅ Unit tests completed"
-    
-    - name: Generate JaCoCo coverage report
-      run: |
-        echo "📊 Generating JaCoCo coverage report..."
-        ./gradlew testDebugUnitTestCoverage --stacktrace
-        echo "✅ Coverage report generated"
-    
-    - name: Run Android Lint
-      run: |
-        echo "🔍 Running Android Lint..."
-        ./gradlew lintDebug --stacktrace
-        echo "✅ Lint analysis completed"
-    
-    - name: Upload test results
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: test-results
-        path: |
-          app/build/reports/jacoco/testDebugUnitTestCoverage/
-          app/build/reports/tests/
-          app/build/reports/lint-results*.xml
-          app/build/test-results/
-        retention-days: 1
-    
-    - name: Publish test results
-      uses: dorny/test-reporter@v1
-      if: success() || failure()
-      with:
-        name: Android Test Results
-        path: app/build/test-results/testDebugUnitTest/TEST-*.xml
-        reporter: java-junit
-
-  # SonarQube Analysis Job
+  # SonarQube Analysis Job - Analyze project structure and scripts
   sonar-analysis:
     name: SonarQube Analysis
     runs-on: ubuntu-latest
-    needs: [build, test]
     
     steps:
     - name: Checkout code
@@ -151,17 +26,11 @@ jobs:
       with:
         fetch-depth: 0  # Disable shallow clone for better analysis
     
-    - name: Download build artifacts
-      uses: actions/download-artifact@v3
+    - name: Set up JDK 11
+      uses: actions/setup-java@v4
       with:
-        name: build-artifacts
-        path: app/build/
-    
-    - name: Download test results
-      uses: actions/download-artifact@v4
-      with:
-        name: test-results
-        path: app/build/
+        java-version: '11'
+        distribution: 'temurin'
     
     - name: Cache SonarQube packages
       uses: actions/cache@v4
@@ -194,18 +63,10 @@ jobs:
         unzip -q sonar-scanner-cli-4.8.0.2856-linux.zip
         export PATH=$PATH:$(pwd)/sonar-scanner-4.8.0.2856-linux/bin
         
-        # Run analysis
+        # Run analysis using the sonar-project.properties in root
         sonar-scanner \
-          -Dsonar.projectKey=android_app \
-          -Dsonar.projectName=AndroidApp \
-          -Dsonar.projectVersion=${{ github.sha }} \
-          -Dsonar.sources=app/src/main/java,app/src/main/kotlin \
-          -Dsonar.tests=app/src/test/java,app/src/test/kotlin \
           -Dsonar.host.url=${{ env.SONAR_HOST_URL }} \
           -Dsonar.login=${{ env.SONAR_TOKEN }} \
-          -Dsonar.coverage.jacoco.xmlReportPaths=app/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml \
-          -Dsonar.android.lint.report=app/build/reports/lint-results-debug.xml \
-          -Dsonar.java.binaries=app/build/intermediates/javac,app/build/tmp/kotlin-classes \
           -Dsonar.branch.name=${{ github.ref_name }}
         
         echo "✅ SonarQube analysis completed"
@@ -242,6 +103,59 @@ jobs:
             context: 'SonarQube Analysis'
           });
 
+  # Android Project Build Job (Optional - for test-android-project)
+  build-android-test:
+    name: Build Test Android Project
+    runs-on: ubuntu-latest
+    if: contains(github.event.head_commit.message, '[build-android]')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up JDK 11
+      uses: actions/setup-java@v4
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    
+    - name: Cache Gradle packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+    
+    - name: Create Gradle Wrapper for test project
+      working-directory: test-android-project
+      run: |
+        echo "📦 Setting up Gradle wrapper for test project..."
+        gradle wrapper --gradle-version 8.0
+        chmod +x gradlew
+    
+    - name: Build test Android project
+      working-directory: test-android-project
+      run: |
+        echo "🔨 Building test Android project..."
+        ./gradlew clean build --stacktrace
+        echo "✅ Test project build completed"
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-test-artifacts
+        path: |
+          test-android-project/app/build/outputs/
+          test-android-project/app/build/reports/
+        retention-days: 1
+
+
+
   # Quality Gate Validation Job
   quality-gate:
     name: Quality Gate Validation
@@ -262,7 +176,7 @@ jobs:
             repo: context.repo.repo,
             sha: context.sha,
             state: 'pending',
-            target_url: '${{ secrets.SONAR_HOST_URL }}',
+            target_url: '${{ env.SONAR_HOST_URL }}',
             description: 'Checking Quality Gate status...',
             context: 'SonarQube Quality Gate'
           });
@@ -299,7 +213,7 @@ jobs:
             repo: context.repo.repo,
             sha: context.sha,
             state: 'success',
-            target_url: '${{ secrets.SONAR_HOST_URL }}',
+            target_url: '${{ env.SONAR_HOST_URL }}',
             description: '${{ steps.quality-gate-check.outputs.quality_gate_description }}',
             context: 'SonarQube Quality Gate'
           });
@@ -315,50 +229,10 @@ jobs:
             repo: context.repo.repo,
             sha: context.sha,
             state: 'failure',
-            target_url: '${{ secrets.SONAR_HOST_URL }}',
+            target_url: '${{ env.SONAR_HOST_URL }}',
             description: 'Quality Gate failed - Code does not meet quality standards',
             context: 'SonarQube Quality Gate'
           });
           
           // Fail the job to prevent merge
           core.setFailed('Quality Gate failed - merge blocked');
-
-  # Deploy Job - Only runs if Quality Gate passes
-  deploy:
-    name: Deploy Application
-    runs-on: ubuntu-latest
-    needs: quality-gate
-    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Deploy to Production
-      run: |
-        echo "🚀 Quality Gate passed! Proceeding with deployment..."
-        echo "📱 Deploying Android application to production..."
-        echo "✅ Deployment completed successfully!"
-        echo "🎉 Application deployed with high code quality standards!"
-    
-    - name: Notify deployment success
-      run: |
-        echo "📧 Sending deployment notification..."
-        echo "✅ Production deployment successful for commit ${{ github.sha }}"
-
-  # Deploy to Staging (for develop branch)
-  deploy-staging:
-    name: Deploy to Staging
-    runs-on: ubuntu-latest
-    needs: quality-gate
-    if: github.ref == 'refs/heads/develop'
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Deploy to Staging
-      run: |
-        echo "🚀 Deploying to staging environment..."
-        echo "📱 Staging deployment completed!"
-        echo "🔗 Staging URL: https://staging.example.com"
