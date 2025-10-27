@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sonarqube
+  namespace: sonarqube
+  labels:
+    app: sonarqube
+    component: server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sonarqube
+  template:
+    metadata:
+      labels:
+        app: sonarqube
+        component: server
+    spec:
+      containers:
+      - name: sonarqube
+        image: sonarqube:10.5-community
+        ports:
+        - containerPort: 9000
+          name: http
+        env:
+        - name: SONAR_ES_BOOTSTRAP_CHECKS_DISABLE
+          value: "true"
+        - name: SONAR_JDBC_URL
+          value: "jdbc:h2:mem:sonarqube"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        readinessProbe:
+          httpGet:
+            path: /api/system/status
+            port: 9000
+          initialDelaySeconds: 90
+          periodSeconds: 30
+          timeoutSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /api/system/status
+            port: 9000
+          initialDelaySeconds: 180
+          periodSeconds: 30
+          timeoutSeconds: 10

@@ -1,0 +1,72 @@
+// Ejemplo de configuración para app/build.gradle
+// Agregar estas configuraciones a tu archivo build.gradle existente
+
+android {
+    // ... tu configuración existente ...
+    
+    testOptions {
+        unitTests.all {
+            useJUnitPlatform()
+            finalizedBy jacocoTestReport
+        }
+    }
+    
+    // Habilitar cobertura de código para builds debug
+    buildTypes {
+        debug {
+            testCoverageEnabled true
+        }
+        // ... otros buildTypes ...
+    }
+}
+
+// Agregar plugin JaCoCo
+apply plugin: 'jacoco'
+
+// Configurar tarea JaCoCo para generar reportes de cobertura
+task jacocoTestReport(type: JacocoReport, dependsOn: ['testDebugUnitTest']) {
+    reports {
+        xml.enabled = true
+        html.enabled = true
+        xml.destination file("${buildDir}/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml")
+    }
+    
+    def fileFilter = [
+        '**/R.class',
+        '**/R$*.class',
+        '**/BuildConfig.*',
+        '**/Manifest*.*',
+        '**/*Test*.*',
+        'android/**/*.*',
+        '**/databinding/**',
+        '**/generated/**'
+    ]
+    
+    def debugTree = fileTree(dir: "${buildDir}/intermediates/javac/debug", excludes: fileFilter)
+    def kotlinDebugTree = fileTree(dir: "${buildDir}/tmp/kotlin-classes/debug", excludes: fileFilter)
+    
+    classDirectories.from = files([debugTree, kotlinDebugTree])
+    sourceDirectories.from = files(['src/main/java', 'src/main/kotlin'])
+    executionData.from = fileTree(dir: "$buildDir", includes: ['**/*.exec', '**/*.ec'])
+}
+
+// Asegurar que JaCoCo se ejecute después de las pruebas
+tasks.withType(Test) {
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport.dependsOn tasks.withType(Test)
+
+// Dependencias necesarias para testing (si no las tienes)
+dependencies {
+    // ... tus dependencias existentes ...
+    
+    // Testing dependencies
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.mockito:mockito-core:5.8.0'
+    testImplementation 'org.mockito:mockito-kotlin:5.2.1'
+    testImplementation 'androidx.test.ext:junit:1.1.5'
+    
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+}

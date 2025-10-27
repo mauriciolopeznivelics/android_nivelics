@@ -1,0 +1,211 @@
+# GitLab CI/CD Pipeline for Android Projects with SonarQube Integration
+# Includes build, test, sonar analysis, quality gate validation, and conditional deployment
+
+stages:
+  - build
+  - test
+  - sonar_analysis
+  - quality_gate
+  - deploy
+
+variables:
+  # Android SDK Configuration
+  ANDROID_COMPILE_SDK: "34"
+  ANDROID_BUILD_TOOLS: "34.0.0"
+  ANDROID_SDK_TOOLS: "9477386"
+  
+  # Gradle Configuration
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.caching=true"
+  GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
+  
+  # SonarQube Configuration
+  SONAR_HOST_URL: "http://your-sonarqube-host:30900"
+  SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+  GIT_DEPTH: "0"
+
+# Cache configuration for faster builds
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - .gradle/wrapper
+    - .gradle/caches
+    - .sonar/cache
+
+# Build Stage - Compile Android Project
+build:
+  stage: build
+  image: gradle:7.6-jdk11
+  before_script:
+    - export GRADLE_USER_HOME=`pwd`/.gradle
+    - chmod +x ./gradlew
+  script:
+    - echo "Building Android project..."
+    - ./gradlew clean assembleDebug --stacktrace
+    - echo "Build completed successfully"
+  artifacts:
+    paths:
+      - app/build/outputs/
+      - app/build/intermediates/
+    expire_in: 1 hour
+  only:
+    - master
+    - develop
+    - merge_requests
+
+# Test Stage - Execute Unit Tests and Generate Coverage
+test:
+  stage: test
+  image: gradle:7.6-jdk11
+  before_script:
+    - export GRADLE_USER_HOME=`pwd`/.gradle
+    - chmod +x ./gradlew
+  script:
+    - echo "Running unit tests..."
+    - ./gradlew testDebugUnitTest --stacktrace
+    - echo "Generating JaCoCo coverage report..."
+    - ./gradlew testDebugUnitTestCoverage --stacktrace
+    - echo "Running Android Lint..."
+    - ./gradlew lintDebug --stacktrace
+    - echo "Tests completed successfully"
+  artifacts:
+    paths:
+      - app/build/reports/jacoco/testDebugUnitTestCoverage/
+      - app/build/reports/tests/
+      - app/build/reports/lint-results*.xml
+      - app/build/test-results/
+    reports:
+      junit:
+        - app/build/test-results/testDebugUnitTest/TEST-*.xml
+    expire_in: 1 hour
+  coverage: '/Total.*?([0-9]{1,3})%/'
+  dependencies:
+    - build
+  only:
+    - master
+    - develop
+    - merge_requests
+
+# SonarQube Analysis Stage
+sonar_analysis:
+  stage: sonar_analysis
+  image: sonarsource/sonar-scanner-cli:latest
+  variables:
+    SONAR_TOKEN: $SONAR_TOKEN
+  before_script:
+    - echo "Preparing SonarQube analysis..."
+    - echo "SonarQube Host URL: $SONAR_HOST_URL"
+  script:
+    - echo "Starting SonarQube analysis..."
+    - sonar-scanner
+      -Dsonar.projectKey=android_app
+      -Dsonar.sources=app/src/main/java,app/src/main/kotlin
+      -Dsonar.tests=app/src/test/java,app/src/test/kotlin
+      -Dsonar.host.url=$SONAR_HOST_URL
+      -Dsonar.login=$SONAR_TOKEN
+      -Dsonar.coverage.jacoco.xmlReportPaths=app/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml
+      -Dsonar.android.lint.report=app/build/reports/lint-results-debug.xml
+      -Dsonar.java.binaries=app/build/intermediates/javac,app/build/tmp/kotlin-classes
+      -Dsonar.projectVersion=$CI_COMMIT_SHORT_SHA
+      -Dsonar.branch.name=$CI_COMMIT_REF_NAME
+    - echo "SonarQube analysis submitted successfully"
+  dependencies:
+    - build
+    - test
+  only:
+    - master
+    - develop
+    - merge_requests
+
+# Quality Gate Validation Stage
+quality_gate:
+  stage: quality_gate
+  image: curlimages/curl:latest
+  variables:
+    SONAR_TOKEN: $SONAR_TOKEN
+  script:
+    - echo "Waiting for Quality Gate result..."
+    - |
+      # Wait for analysis to complete and get Quality Gate status
+      PROJECT_KEY="android_app"
+      MAX_ATTEMPTS=30
+      ATTEMPT=0
+      
+      while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+        echo "Checking Quality Gate status (attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS)..."
+        
+        # Get project status
+        RESPONSE=$(curl -s -u "$SONAR_TOKEN:" \
+          "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=$PROJECT_KEY")
+        
+        echo "Response: $RESPONSE"
+        
+        # Extract status
+        STATUS=$(echo $RESPONSE | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+        
+        if [ "$STATUS" = "OK" ]; then
+          echo "✅ Quality Gate PASSED! Code quality meets requirements."
+          
+          # Get coverage information
+          COVERAGE_RESPONSE=$(curl -s -u "$SONAR_TOKEN:" \
+            "$SONAR_HOST_URL/api/measures/component?component=$PROJECT_KEY&metricKeys=coverage")
+          COVERAGE=$(echo $COVERAGE_RESPONSE | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
+          
+          echo "📊 Code Coverage: ${COVERAGE}%"
+          exit 0
+        elif [ "$STATUS" = "ERROR" ]; then
+          echo "❌ Quality Gate FAILED! Code does not meet quality requirements."
+          
+          # Get detailed failure information
+          CONDITIONS_RESPONSE=$(curl -s -u "$SONAR_TOKEN:" \
+            "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=$PROJECT_KEY")
+          echo "Quality Gate Details: $CONDITIONS_RESPONSE"
+          
+          exit 1
+        else
+          echo "⏳ Quality Gate status: $STATUS (waiting...)"
+          sleep 10
+          ATTEMPT=$((ATTEMPT + 1))
+        fi
+      done
+      
+      echo "❌ Timeout waiting for Quality Gate result"
+      exit 1
+  dependencies:
+    - sonar_analysis
+  only:
+    - master
+    - develop
+    - merge_requests
+
+# Deploy Stage - Only runs if Quality Gate passes
+deploy:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "🚀 Quality Gate passed! Proceeding with deployment..."
+    - echo "📱 Deploying Android application..."
+    - echo "✅ Deployment completed successfully!"
+    - echo "🎉 Application deployed with high code quality standards!"
+  dependencies:
+    - quality_gate
+  only:
+    - master
+  when: on_success
+
+# Manual deployment for develop branch (optional)
+deploy_staging:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "🚀 Deploying to staging environment..."
+    - echo "📱 Staging deployment completed!"
+  dependencies:
+    - quality_gate
+  only:
+    - develop
+  when: manual
+  allow_failure: true
