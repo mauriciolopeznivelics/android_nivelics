@@ -39,29 +39,19 @@ jobs:
         key: ${{ runner.os }}-sonar
         restore-keys: ${{ runner.os }}-sonar
     
-    - name: Update GitHub Status - Analysis Started
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          github.rest.repos.createCommitStatus({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            sha: context.sha,
-            state: 'pending',
-            target_url: '${{ env.SONAR_HOST_URL }}',
-            description: 'SonarQube analysis in progress...',
-            context: 'SonarQube Analysis'
-          });
+    - name: Analysis Started
+      run: echo "🔍 Starting SonarQube analysis..."
     
     - name: SonarQube Scan
       run: |
-        echo "🔍 Starting SonarQube analysis..."
+        echo "📦 Installing SonarQube Scanner..."
         
         # Install SonarQube Scanner
         wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.8.0.2856-linux.zip
         unzip -q sonar-scanner-cli-4.8.0.2856-linux.zip
         export PATH=$PATH:$(pwd)/sonar-scanner-4.8.0.2856-linux/bin
+        
+        echo "🔍 Running SonarQube analysis..."
         
         # Run analysis using the sonar-project.properties in root
         sonar-scanner \
@@ -69,39 +59,18 @@ jobs:
           -Dsonar.login=${{ env.SONAR_TOKEN }} \
           -Dsonar.branch.name=${{ github.ref_name }}
         
-        echo "✅ SonarQube analysis completed"
+        echo "✅ SonarQube analysis completed successfully!"
     
-    - name: Update GitHub Status - Analysis Completed
-      if: success()
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          github.rest.repos.createCommitStatus({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            sha: context.sha,
-            state: 'success',
-            target_url: '${{ env.SONAR_HOST_URL }}',
-            description: 'SonarQube analysis completed successfully',
-            context: 'SonarQube Analysis'
-          });
-    
-    - name: Update GitHub Status - Analysis Failed
-      if: failure()
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          github.rest.repos.createCommitStatus({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            sha: context.sha,
-            state: 'failure',
-            target_url: '${{ env.SONAR_HOST_URL }}',
-            description: 'SonarQube analysis failed',
-            context: 'SonarQube Analysis'
-          });
+    - name: Analysis Summary
+      if: always()
+      run: |
+        if [ ${{ job.status }} == 'success' ]; then
+          echo "✅ SonarQube analysis completed successfully!"
+          echo "🔗 View results at: ${{ env.SONAR_HOST_URL }}"
+        else
+          echo "❌ SonarQube analysis failed!"
+          echo "🔗 Check logs at: ${{ env.SONAR_HOST_URL }}"
+        fi
 
   # Android Project Build Job (Optional - for test-android-project)
   build-android-test:
@@ -166,20 +135,8 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Update GitHub Status - Quality Gate Checking
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          github.rest.repos.createCommitStatus({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            sha: context.sha,
-            state: 'pending',
-            target_url: '${{ env.SONAR_HOST_URL }}',
-            description: 'Checking Quality Gate status...',
-            context: 'SonarQube Quality Gate'
-          });
+    - name: Quality Gate Check Started
+      run: echo "⏳ Checking Quality Gate status..."
     
     - name: Wait for Quality Gate
       id: quality-gate-check
@@ -202,37 +159,15 @@ jobs:
         SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     
-    - name: Update GitHub Status - Quality Gate Success
-      if: success()
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          github.rest.repos.createCommitStatus({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            sha: context.sha,
-            state: 'success',
-            target_url: '${{ env.SONAR_HOST_URL }}',
-            description: '${{ steps.quality-gate-check.outputs.quality_gate_description }}',
-            context: 'SonarQube Quality Gate'
-          });
-    
-    - name: Update GitHub Status - Quality Gate Failed
-      if: failure()
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          github.rest.repos.createCommitStatus({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            sha: context.sha,
-            state: 'failure',
-            target_url: '${{ env.SONAR_HOST_URL }}',
-            description: 'Quality Gate failed - Code does not meet quality standards',
-            context: 'SonarQube Quality Gate'
-          });
-          
-          // Fail the job to prevent merge
-          core.setFailed('Quality Gate failed - merge blocked');
+    - name: Quality Gate Summary
+      if: always()
+      run: |
+        if [ ${{ steps.quality-gate-check.outcome }} == 'success' ]; then
+          echo "✅ ${{ steps.quality-gate-check.outputs.quality_gate_description }}"
+          echo "🎉 Code meets quality standards - merge allowed!"
+        else
+          echo "❌ Quality Gate failed - Code does not meet quality standards"
+          echo "🚫 Merge blocked until quality issues are resolved"
+          echo "🔗 View details at: ${{ env.SONAR_HOST_URL }}"
+          exit 1
+        fi
